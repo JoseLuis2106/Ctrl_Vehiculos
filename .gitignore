@@ -1,0 +1,12 @@
+# Ignorar carpetas de compilación
+build/
+install/
+log/
+
+# Ignorar archivos temporales de Python y Gazebo
+__pycache__/
+*.pyc
+*.log
+
+# Ignorar archivos de mapa si prefieres no subirlos (aunque en este caso yo sí los subiría)
+# src/niagara_model/maps/*.pgm
