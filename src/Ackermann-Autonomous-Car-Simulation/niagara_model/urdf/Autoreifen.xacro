@@ -31,8 +31,8 @@
   <xacro:property name="degrees_90" value="1.57079633"/>
   <xacro:property name="degrees_180" value="3.14159265"/>
 
-  <xacro:property name="servo_stall_torque" value="75"/>  <!-- check -->
-  <xacro:property name="servo_no_load_speed" value="20"/> <!-- check -->
+  <xacro:property name="servo_stall_torque" value="100000"/>  <!-- check -->
+  <xacro:property name="servo_no_load_speed" value="1000"/> <!-- check -->
 
   <material name="black">
       <color rgba="0 0 0 1"/>

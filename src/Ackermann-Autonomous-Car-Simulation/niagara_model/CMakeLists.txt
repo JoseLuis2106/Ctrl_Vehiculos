@@ -27,4 +27,9 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/parking_detector.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
