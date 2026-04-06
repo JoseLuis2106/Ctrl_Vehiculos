@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point, PoseStamped
+from geometry_msgs.msg import Point, PoseStamped, Twist
+from nav2_msgs.action import ComputePathToPose
 import numpy as np
 import colorsys
 import math
@@ -24,6 +26,9 @@ class ParkingDetector(Node):
         self.marker_pub = self.create_publisher(Marker, '/parking_slot_marker', qos_viz)
         self.cluster_pub = self.create_publisher(MarkerArray, '/viz_clusters', qos_viz)
         self.goal_pub = self.create_publisher(PoseStamped, '/parking_goal', qos_viz)
+        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        self._action_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
 
         # Configuración de TF2 para transformar coordenadas
         self.tf_buffer = tf2_ros.Buffer()
@@ -31,8 +36,62 @@ class ParkingDetector(Node):
 
         self.min_slot_width = 3.8   
         self.max_slot_width = 7.5   
+        
+        self.state = "SEARCHING"
+        self.path_requested = False
+
+    def move_forward(self):
+        msg = Twist()
+        msg.linear.x = 0.4 
+        self.cmd_pub.publish(msg)
+
+    def stop_car(self):
+        msg = Twist()
+        msg.linear.x = 0.0
+        self.cmd_pub.publish(msg)
+        self.state = "STOPPED"
+        self.get_logger().info("¡HUECO ALCANZADO! Coche detenido.")
+
+    def send_path_request(self, goal_pose):
+        """Envía la meta a la acción de Nav2"""
+        if self.path_requested:
+            return
+
+        if not self._action_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error('Acción /compute_path_to_pose no disponible')
+            return
+
+        goal_msg = ComputePathToPose.Goal()
+        goal_msg.goal = goal_pose
+        goal_msg.planner_id = 'GridBased'
+        goal_msg.use_start = False # Nav2 usará la posición actual del TF
+
+        self.path_requested = True
+        self._send_goal_future = self._action_client.send_goal_async(goal_msg)
+        self._send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().info('Planificación rechazada por Nav2')
+            self.path_requested = False
+            return
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(self.get_result_callback)
+
+    def get_result_callback(self, future):
+        result = future.result().result
+        if len(result.path.poses) > 0:
+            self.get_logger().info(f'¡Trayectoria recibida con {len(result.path.poses)} puntos!')
+            # Aquí podrías iniciar el seguimiento de la ruta
+        else:
+            self.get_logger().warn('Nav2 devolvió una ruta vacía')
+            self.path_requested = False
 
     def scan_callback(self, msg):
+        if self.state != "STOPPED":
+            self.move_forward()        
+    
         ranges = np.array(msg.ranges)
         angles = np.linspace(msg.angle_min, msg.angle_max, len(ranges))
         mask = (ranges > 0.1) & (ranges < 10.0)
@@ -59,7 +118,6 @@ class ParkingDetector(Node):
             d_right = np.min(np.linalg.norm(c_right, axis=1))
 
             if d_mid > (d_left + 0.5) and d_mid > (d_right + 0.5):
-                # Usamos argmin para p1 y p2 (tu mejora)
                 p1 = c_left[np.argmin(np.linalg.norm(c_left, axis=1))]
                 p2 = c_right[np.argmin(np.linalg.norm(c_right, axis=1))]
                 width = np.linalg.norm(p2 - p1)
@@ -67,11 +125,15 @@ class ParkingDetector(Node):
                 if self.min_slot_width < width < self.max_slot_width:
                     center = (p1 + p2) / 2
                     self.publish_marker(center, width)
-                    self.publish_goal(p1, p2, center)
+
+                    if center[0] < -0.5: 
+                        self.stop_car()
+                        self.publish_goal(p1, p2, center)
+                    else:
+                        self.move_forward()
 
     def publish_goal(self, p1, p2, center):
         goal_base = PoseStamped()
-        # Cambiamos base_link por base_footprint
         goal_base.header.frame_id = "base_footprint" 
         goal_base.header.stamp = self.get_clock().now().to_msg()
         
@@ -84,6 +146,7 @@ class ParkingDetector(Node):
         
         goal_base.pose.orientation.z = math.sin(yaw / 2.0)
         goal_base.pose.orientation.w = math.cos(yaw / 2.0)
+        self.send_path_request(goal_base)
 
         try:
             latest_time = rclpy.time.Time() 
@@ -135,8 +198,9 @@ class ParkingDetector(Node):
 def main():
     rclpy.init()
     node = ParkingDetector()
-    try: rclpy.spin(node)
-    except KeyboardInterrupt: pass
+    while node.state != "STOPPED":
+        try: rclpy.spin_once(node)
+        except KeyboardInterrupt: pass
     node.destroy_node()
     rclpy.shutdown()
 

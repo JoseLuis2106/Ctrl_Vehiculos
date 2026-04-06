@@ -82,7 +82,7 @@
       <axis xyz="-1 0 0"/>
       <limit lower="${-degrees_45}" upper="${degrees_45}"
             effort="${servo_stall_torque}" velocity="${servo_no_load_speed}"/>
-      <dynamics damping="10.0" friction="1.0"/>
+      <dynamics damping="0.0" friction="0.0"/>
     </joint>
 
 
