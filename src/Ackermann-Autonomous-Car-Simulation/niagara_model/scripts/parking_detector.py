@@ -3,17 +3,16 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from tf2_geometry_msgs import PoseStamped
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, PoseStamped, Twist
-from nav2_msgs.action import ComputePathToPose
+from nav2_msgs.action import NavigateToPose
+from action_msgs.msg import GoalStatus
 import numpy as np
 import colorsys
 import math
-
-# Necesitas tener instalado: sudo apt install ros-humble-tf2-geometry-msgs
 import tf2_ros
-import tf2_geometry_msgs
 
 class ParkingDetector(Node):
     def __init__(self):
@@ -28,7 +27,7 @@ class ParkingDetector(Node):
         self.goal_pub = self.create_publisher(PoseStamped, '/parking_goal', qos_viz)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        self._action_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
+        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         # Configuración de TF2 para transformar coordenadas
         self.tf_buffer = tf2_ros.Buffer()
@@ -52,23 +51,52 @@ class ParkingDetector(Node):
         self.state = "STOPPED"
         self.get_logger().info("¡HUECO ALCANZADO! Coche detenido.")
 
-    def send_path_request(self, goal_pose):
-        """Envía la meta a la acción de Nav2"""
+    def send_path_request(self, goal_pose_odom):
+        """Envía la meta transformada en ODOM a la acción de Nav2"""
         if self.path_requested:
             return
 
-        if not self._action_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error('Acción /compute_path_to_pose no disponible')
+        # Corregido: nombre del cliente coincidente con __init__
+        if not self.nav_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error('Acción NavigateToPose no disponible')
             return
 
-        goal_msg = ComputePathToPose.Goal()
-        goal_msg.goal = goal_pose
-        goal_msg.planner_id = 'GridBased'
-        goal_msg.use_start = False # Nav2 usará la posición actual del TF
-
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = goal_pose_odom # <-- IMPORTANTE: Usar la pose en ODOM
+        
+        self.get_logger().info('Enviando meta definitiva a Nav2...')
         self.path_requested = True
-        self._send_goal_future = self._action_client.send_goal_async(goal_msg)
-        self._send_goal_future.add_done_callback(self.goal_response_callback)
+        
+        # Conectamos el callback para recibir la respuesta del servidor
+        send_goal_future = self.nav_client.send_goal_async(goal_msg)
+        send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def publish_goal(self, p1, p2, center):
+        # 1. Calculamos la pose en local (base_footprint) como ya hacías
+        goal_base = PoseStamped()
+        goal_base.header.frame_id = "base_footprint" 
+        goal_base.header.stamp = rclpy.time.Time().to_msg()
+        
+        yaw = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+        inward_angle = yaw - (math.pi / 2.0)
+        dist_offset = 1.2 # Un poco más de margen para que Nav2 maniobre
+
+        goal_base.pose.position.x = center[0] + dist_offset * math.cos(inward_angle)
+        goal_base.pose.position.y = center[1] + dist_offset * math.sin(inward_angle)
+        
+        goal_base.pose.orientation.z = math.sin(yaw / 2.0)
+        goal_base.pose.orientation.w = math.cos(yaw / 2.0)
+
+        # 2. Transformamos a ODOM antes de enviar a Nav2
+        try:
+            goal_odom = self.tf_buffer.transform(goal_base, "odom", timeout=rclpy.duration.Duration(seconds=0.1))
+            
+            # 3. PUBLICAMOS Y ENVIAMOS ACCIÓN
+            self.goal_pub.publish(goal_odom)
+            self.send_path_request(goal_odom)
+            
+        except Exception as e:
+            self.get_logger().error(f"Fallo en la transformación: {str(e)}")
 
     def goal_response_callback(self, future):
         goal_handle = future.result()
@@ -80,13 +108,11 @@ class ParkingDetector(Node):
         self._get_result_future.add_done_callback(self.get_result_callback)
 
     def get_result_callback(self, future):
-        result = future.result().result
-        if len(result.path.poses) > 0:
-            self.get_logger().info(f'¡Trayectoria recibida con {len(result.path.poses)} puntos!')
-            # Aquí podrías iniciar el seguimiento de la ruta
+        status = future.result().status
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().info("¡Meta alcanzada con éxito!")
         else:
-            self.get_logger().warn('Nav2 devolvió una ruta vacía')
-            self.path_requested = False
+            self.get_logger().warn(f"La meta falló con estado: {status}")
 
     def scan_callback(self, msg):
         if self.state != "STOPPED":
@@ -122,7 +148,7 @@ class ParkingDetector(Node):
                 p2 = c_right[np.argmin(np.linalg.norm(c_right, axis=1))]
                 width = np.linalg.norm(p2 - p1)
 
-                if self.min_slot_width < width < self.max_slot_width:
+                if self.min_slot_width < width < self.max_slot_width and self.state != "STOPPED":
                     center = (p1 + p2) / 2
                     self.publish_marker(center, width)
 
@@ -132,40 +158,6 @@ class ParkingDetector(Node):
                     else:
                         self.move_forward()
 
-    def publish_goal(self, p1, p2, center):
-        goal_base = PoseStamped()
-        goal_base.header.frame_id = "base_footprint" 
-        goal_base.header.stamp = self.get_clock().now().to_msg()
-        
-        yaw = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
-        inward_angle = yaw - (math.pi / 2.0)
-        dist_offset = 1.0
-
-        goal_base.pose.position.x = center[0] + dist_offset * math.cos(inward_angle)
-        goal_base.pose.position.y = center[1] + dist_offset * math.sin(inward_angle)
-        
-        goal_base.pose.orientation.z = math.sin(yaw / 2.0)
-        goal_base.pose.orientation.w = math.cos(yaw / 2.0)
-        self.send_path_request(goal_base)
-
-        try:
-            latest_time = rclpy.time.Time() 
-
-            if self.tf_buffer.can_transform("odom", "base_footprint", latest_time, rclpy.duration.Duration(seconds=0.1)):
-                
-                transform = self.tf_buffer.lookup_transform(
-                    "odom", 
-                    "base_footprint", 
-                    latest_time
-                )
-                
-                goal_odom = tf2_geometry_msgs.do_pose_stamped_transform(goal_base, transform)
-                
-                self.goal_pub.publish(goal_odom)
-            
-        except Exception as e:
-            self.get_logger().debug(f"Esperando sincronización de frames... {str(e)}")
-            self.goal_pub.publish(goal_base)
 
     def viz_clusters(self, clusters):
         marker_array = MarkerArray()
@@ -195,12 +187,14 @@ class ParkingDetector(Node):
         marker.color.a, marker.color.g = 1.0, 1.0
         self.marker_pub.publish(marker)
 
+
 def main():
     rclpy.init()
     node = ParkingDetector()
-    while node.state != "STOPPED":
-        try: rclpy.spin_once(node)
-        except KeyboardInterrupt: pass
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     node.destroy_node()
     rclpy.shutdown()
 

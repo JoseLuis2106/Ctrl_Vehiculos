@@ -65,9 +65,8 @@
     
 
     <!-- <xacro:include filename="$(find niagara_model)/urdf/sensors.xacro" /> -->
-    <xacro:include filename="$(find niagara_model)/urdf/AckermannPlugIn.xacro" />
-
-
-
+    <xacro:include filename="$(find niagara_model)/urdf/AckermannPlugIn.xacro" /> 
 
 </robot>
+
+

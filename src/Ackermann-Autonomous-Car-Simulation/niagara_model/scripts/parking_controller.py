@@ -23,7 +23,6 @@ class PreciseParkingPI(Node):
         self.Kp = 5.5           # Ganancia Proporcional (Aumentada para más giro)
         self.Ki = 0.2           # Ganancia Integral (Para eliminar error acumulado)
         self.integral_error = 0.0
-        self.max_integral = 0.6 # Anti-windup
         # -------------------------------------
 
         self.dist_tolerance = 0.12
@@ -82,9 +81,6 @@ class PreciseParkingPI(Node):
         
         # Acumular error integral solo si nos estamos moviendo
         self.integral_error += error * 0.1 
-        
-        # Anti-windup: Limitamos la influencia de la integral
-        self.integral_error = max(min(self.integral_error, self.max_integral), -self.max_integral)
         
         # Salida del controlador
         u_p = self.Kp * error

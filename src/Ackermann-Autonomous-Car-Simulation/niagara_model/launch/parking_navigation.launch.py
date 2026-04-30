@@ -4,7 +4,6 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # Cambia 'niagara_model' por el nombre real de tu paquete
     pkg_share = get_package_share_directory('niagara_model')
     nav2_params = os.path.join(pkg_share, 'config', 'nav2_params.yaml')
 
@@ -17,13 +16,11 @@ def generate_launch_description():
             parameters=[nav2_params]),
 
         Node(
-            package='nav2_lifecycle_manager',
-            executable='lifecycle_manager',
-            name='lifecycle_manager_navigation',
+            package='nav2_controller',
+            executable='controller_server',
+            name='controller_server',
             output='screen',
-            parameters=[{'use_sim_time': True},
-                        {'autostart': True},
-                        {'node_names': ['planner_server']}]),
+            parameters=[nav2_params]),
 
         Node(
             package='niagara_model',
@@ -33,9 +30,26 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}]),
 
         Node(
-            package='niagara_model',
-            executable='parking_controller.py',
-            name='parking_controller',
+            package='nav2_behaviors',
+            executable='behavior_server',
+            name='behavior_server',
             output='screen',
-            parameters=[{'use_sim_time': True}]),
+            parameters=[nav2_params]),
+
+        Node(
+            package='nav2_bt_navigator',
+            executable='bt_navigator',
+            name='bt_navigator',
+            output='screen',
+            parameters=[nav2_params]),
+
+
+        Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_navigation',
+            output='screen',
+            parameters=[{'use_sim_time': True},
+                        {'autostart': True},
+                        {'node_names': ['planner_server', 'controller_server', 'behavior_server', 'bt_navigator']}])
     ])
