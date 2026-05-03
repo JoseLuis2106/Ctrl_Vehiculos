@@ -273,30 +273,28 @@ class ParkingDetector(Node):
 
                     y_wall = np.mean(c_mid[:, 1])                    
                     y_goal = center[1]
-                    d_goal_wall = abs(y_wall-y_goal)
+                    d_goal_wall = abs(y_wall - y_goal)
 
-                    # self.get_logger().info(f"y_wall: {y_wall:.2f}")
-                    # self.get_logger().info(f"y_goal: {y_goal:.2f}")
-                    # self.get_logger().info(f"d_goal_wall: {d_goal_wall:.2f}")
-
-                    y_goal += max(0,self.offsety - d_goal_wall)
-
-                    # self.get_logger().info(f"\ny_goal nuevo: {y_goal:.2f}\n")
-                    # self.get_logger().info(f"\nd_goal_wall nuevo: {abs(y_wall-y_goal):.2f}\n")
-
-                    center[1] = y_goal
-
-                    # center[1] += 0.2
+                    # --- CORRECCIÓN OFFSET Y (Profundidad) ---
+                    # Si el muro está a la izquierda (y_wall > y_goal), restamos para alejarnos.
+                    # Si está a la derecha, sumamos.
+                    direction_y = -1.0 if y_wall > y_goal else 1.0
+                    y_adjustment = max(0, self.offsety - d_goal_wall)
+                    center[1] += direction_y * y_adjustment
 
                     if center[0] < 0.0: 
                         self.get_logger().info(f"HUECO DETECTADO! Ancho: {width:.2f}m")
                         self.stop_car()
-
-                        v_ext = p2 - p1
-                        v_int = p3 - p4
-                        v = (v_ext + v_int) / 2.0
+                        pts = [p1, p2, p3, p4]
+                        pts_sorted = sorted(pts, key=lambda p: p[0])
+                        
+                        p_rear_avg = (pts_sorted[0] + pts_sorted[1]) / 2.0
+                        p_front_avg = (pts_sorted[2] + pts_sorted[3]) / 2.0
+                        
+                        v = p_front_avg - p_rear_avg
                         yaw = math.atan2(v[1], v[0])
                         
+                        self.get_logger().info(f"Yaw calculado: {yaw:.2f} rad")
                         self.publish_goal(center, yaw)
 
 
