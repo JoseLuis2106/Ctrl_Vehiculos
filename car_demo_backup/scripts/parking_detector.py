@@ -37,10 +37,10 @@ class ParkingDetector(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        self.min_slot_width = 5.0
+        self.min_slot_width = 5.5
         self.max_slot_width = 9.0 
-        self.offsetx = 1.2 
-        self.offsety = 1.2
+        self.offsetx = 1.4 
+        self.offsety = 1.3
 
         self.replan_timer = None
         self.parking_finished = False
@@ -51,7 +51,7 @@ class ParkingDetector(Node):
 
     def move_forward(self):
         msg = Twist()
-        msg.linear.x = 0.75 
+        msg.linear.x = 0.8 
         self.cmd_pub.publish(msg)
 
     def stop_car(self):
@@ -59,7 +59,7 @@ class ParkingDetector(Node):
         msg.linear.x = 0.0
         self.cmd_pub.publish(msg)
         self.state = "STOPPED"
-        self.get_logger().info("¡HUECO ALCANZADO! Coche detenido.")
+        self.get_logger().info("¡Hueco rebasado! Coche detenido.")
 
     def send_path_request(self, goal_pose_odom):
         """Envía la meta transformada en ODOM a la acción de Nav2"""
@@ -169,7 +169,7 @@ class ParkingDetector(Node):
     def get_result_callback(self, future):
         status = future.result().status
         if status == GoalStatus.STATUS_SUCCEEDED:
-            self.get_logger().info("¡Meta alcanzada con éxito!")
+            self.get_logger().info("¡Meta planificada con éxito!")
         else:
             self.get_logger().warn(f"La meta falló con estado: {status}")
 

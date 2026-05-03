@@ -1,80 +1,103 @@
 #!/usr/bin/env python3
-"""
-parking_controller.py  –  Controlador de aparcamiento para vehículo Ackermann (ROS 2 Humble)
-
-Estrategia:
-  1. Al recibir un path de Nav2 (Reeds-Shepp), se divide en segmentos entre cúspides.
-  2. Para cada segmento se calcula la dirección de marcha (adelante / atrás) UNA SOLA VEZ,
-     de forma que el controlador nunca necesita inferirla en tiempo real → elimina la oscilación.
-  3. Al acercarse a una cúspide se reduce la velocidad proporcionalmente.
-  4. Al llegar a una cúspide el coche frena y espera un breve instante (settling) antes de
-     iniciar el segmento siguiente con la nueva dirección.
-  5. Pure Pursuit clásico con ángulo de volante limitado a los valores físicos del Ackermann.
-"""
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Path, Odometry
-from visualization_msgs.msg import Marker
-from geometry_msgs.msg import Point
 import math
 import numpy as np
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Utilidades
-# ──────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Parámetros
+# ═════════════════════════════════════════════════════════════════════════════
 
-def pose_to_xy(pose_stamped):
-    return np.array([pose_stamped.pose.position.x,
-                     pose_stamped.pose.position.y])
+LOOKAHEAD_DIST      = 0.8    # [m]
+CUSP_TOLERANCE      = 0.20   # [m]
+GOAL_TOLERANCE      = 0.20   # [m]  radio posición para «en meta»
+GOAL_YAW_TOL        = 0.03   # [rad] ~1.72°
+MAX_SPEED           = 0.70   # [m/s]
+MIN_SPEED           = 0.15   # [m/s]
+MICRO_SPEED         = 0.08   # [m/s]
+K_ANGULAR           = 6.0
+K_YAW_ALIGN         = 7.5
+MAX_STEER           = 1.20   # [rad]
+APPROACH_SLOW_DIST  = 2.5    # [m]
+ALIGN_TRIGGER_DIST  = 4.0    # [m]
+SETTLING_TIME       = 0.80   # [s]  pausa entre cúspides (fases 1-2)
+
+# ── Fase 3 ────────────────────────────────────────────────────────────────
+P3_ENTRY_DIST       = 0.55   # [m]  distancia para activar el latch de Fase 3
+P3_DRIFT_TOL_FACTOR = 1.5    # umbral de alejamiento = factor × GOAL_TOLERANCE
+P3_SETTLE_TICKS     = 8      # ciclos de parada limpia (~0.4 s a 20 Hz)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Estados Fase 3
+# ═════════════════════════════════════════════════════════════════════════════
+
+P3_APPROACH       = "APPROACH"
+P3_SETTLE_TO_YAW  = "SETTLE_TO_YAW"
+P3_YAW_CORRECT    = "YAW_CORRECT"
+P3_SETTLE_TO_APPR = "SETTLE_TO_APPROACH"
+P3_DONE           = "DONE"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═════════════════════════════════════════════════════════════════════════════
+
+def pose_to_xy(ps):
+    return np.array([ps.pose.position.x, ps.pose.position.y])
 
 def yaw_from_quat(q):
     return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                       1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
+def normalize_angle(a):
+    while a >  math.pi: a -= 2.0 * math.pi
+    while a <= -math.pi: a += 2.0 * math.pi
+    return a
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Nodo principal
-# ──────────────────────────────────────────────────────────────────────────────
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Nodo
+# ═════════════════════════════════════════════════════════════════════════════
 
 class ParkingController(Node):
-
-    # ── Parámetros ─────────────────────────────────────────────────────────────
-    LOOKAHEAD_DIST     = 0.8    # [m]  distancia de mira para Pure Pursuit
-    CUSP_TOLERANCE     = 0.2    # [m]  radio para considerar cúspide alcanzada
-    GOAL_TOLERANCE     = 0.05   # [m]  radio para considerar goal final alcanzado
-    MAX_SPEED          = 0.50   # [m/s]
-    MIN_SPEED          = 0.15   # [m/s]  mínimo para no quedarse parado
-    K_ANGULAR          = 5.0    # ganancia de dirección
-    MAX_STEER          = 1.20   # [rad] límite físico del volante
-    APPROACH_SLOW_DIST = 2.0    # [m]  empieza a frenar cuando queda esta distancia al cusp
-    SETTLING_TIME      = 0.40   # [s]  pausa en cúspide para estabilizar
 
     def __init__(self):
         super().__init__('parking_controller')
 
-        self.cmd_pub  = self.create_publisher(Twist,  '/cmd_vel', 10)
-        self.path_sub = self.create_subscription(Path,     '/plan', self.path_callback, 10)
-        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.cmd_pub  = self.create_publisher(Twist,     '/cmd_vel', 10)
+        self.path_sub = self.create_subscription(Path,     '/plan',  self.path_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/odom',  self.odom_callback, 10)
 
-        # Estado del robot
         self.current_x   = 0.0
         self.current_y   = 0.0
         self.current_yaw = 0.0
 
-        # Estado de navegación
-        self.segments        = []   # lista de dicts: {'poses', 'direction'}
+        self.segments        = []
         self.current_seg_idx = 0
         self.is_navigating   = False
         self.settling        = False
         self.settle_start    = 0.0
+        self.goal_yaw        = 0.0
 
-        self.create_timer(0.05, self.control_loop)   # 20 Hz
+        # Fase 3
+        self.p3_active       = False        # latch: True una vez que se entra en Fase 3
+        self.p3_state        = P3_YAW_CORRECT
+        self.p3_settle_count = 0
+
+        self.create_timer(0.05, self.control_loop)
         self.get_logger().info("Parking controller iniciado.")
 
-    # ── Callbacks ──────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Callbacks
+    # ─────────────────────────────────────────────────────────────────────────
 
     def odom_callback(self, msg):
         self.current_x   = msg.pose.pose.position.x
@@ -84,142 +107,220 @@ class ParkingController(Node):
     def path_callback(self, msg):
         if len(msg.poses) < 2:
             return
+        self.goal_yaw = yaw_from_quat(msg.poses[-1].pose.orientation)
         self._build_segments(msg.poses)
         if not self.segments:
-            self.get_logger().warn("No se generaron segmentos; path ignorado.")
+            self.get_logger().warn("Sin segmentos; path ignorado.")
             return
         self.current_seg_idx = 0
         self.is_navigating   = True
         self.settling        = False
+        # Reset completo de Fase 3 al recibir un path nuevo
+        self.p3_active       = False
+        self.p3_state        = P3_APPROACH
+        self.p3_settle_count = 0
         self.get_logger().info(
-            f"Nuevo path: {len(msg.poses)} puntos → {len(self.segments)} segmentos.")
+            f"Nuevo path: {len(msg.poses)} pts → {len(self.segments)} segs "
+            f"| goal_yaw={math.degrees(self.goal_yaw):.1f}°")
         for i, s in enumerate(self.segments):
             d = "ADELANTE" if s['direction'] > 0 else "ATRÁS"
-            self.get_logger().info(f"  Seg {i}: {len(s['poses'])} pts  [{d}]")
+            self.get_logger().info(f"  Seg {i}: {len(s['poses'])} pts [{d}]")
 
-    # ── Construcción de segmentos ───────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Segmentos
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _build_segments(self, poses):
-        """
-        Divide el path en segmentos separados por cúspides (cambios de sentido).
-        Para cada segmento determina si es hacia adelante (+1) o hacia atrás (-1).
-        """
         self.segments = []
         seg_start = 0
-
         for i in range(1, len(poses) - 1):
             v_before = pose_to_xy(poses[i])   - pose_to_xy(poses[i-1])
             v_after  = pose_to_xy(poses[i+1]) - pose_to_xy(poses[i])
-            if np.dot(v_before, v_after) < 0:          # cúspide
+            if np.dot(v_before, v_after) < 0:
                 self._add_segment(poses[seg_start : i + 1])
-                seg_start = i                           # la cúspide pertenece a ambos
-
-        self._add_segment(poses[seg_start:])            # último segmento
+                seg_start = i
+        self._add_segment(poses[seg_start:])
 
     def _add_segment(self, poses):
         if len(poses) < 2:
             return
-        direction = self._segment_direction(poses)
-        self.segments.append({'poses': poses, 'direction': direction})
+        self.segments.append({'poses': poses,
+                               'direction': self._segment_direction(poses)})
 
     def _segment_direction(self, poses):
-        """
-        Voto mayoritario: proyecta el movimiento de cada paso sobre la orientación
-        del waypoint anterior para decidir si el segmento es adelante o atrás.
-        """
         votes = 0
         for i in range(len(poses) - 1):
             dp    = pose_to_xy(poses[i+1]) - pose_to_xy(poses[i])
             yaw_i = yaw_from_quat(poses[i].pose.orientation)
-            # Componente del movimiento en la dirección de la cabeza del coche
             proj  = dp[0] * math.cos(yaw_i) + dp[1] * math.sin(yaw_i)
             votes += 1 if proj >= 0 else -1
         return 1 if votes >= 0 else -1
 
-    # ── Bucle de control ───────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Bucle principal (20 Hz)
+    # ─────────────────────────────────────────────────────────────────────────
 
     def control_loop(self):
         if not self.is_navigating or not self.segments:
             return
 
-        # ── Segmento actual agotado / meta final ───────────────────────────────
         if self.current_seg_idx >= len(self.segments):
             self._publish_cmd(0.0, 0.0)
             self.is_navigating = False
             self.get_logger().info("¡Aparcamiento completado!")
             return
 
-        # ── Fase settling (pausa en cúspide) ───────────────────────────────────
+        # ── Settling entre cúspides ───────────────────────────────────────
         if self.settling:
             elapsed = self.get_clock().now().nanoseconds / 1e9 - self.settle_start
-            if elapsed < self.SETTLING_TIME:
+            if elapsed < SETTLING_TIME:
                 self._publish_cmd(0.0, 0.0)
                 return
             self.settling = False
-            self.get_logger().info(
-                f"Reanudando → segmento {self.current_seg_idx} "
-                f"({'ADELANTE' if self.segments[self.current_seg_idx]['direction'] > 0 else 'ATRÁS'})")
+            d = "ADELANTE" if self.segments[self.current_seg_idx]['direction'] > 0 else "ATRÁS"
+            self.get_logger().info(f"→ Seg {self.current_seg_idx} [{d}]")
 
         seg       = self.segments[self.current_seg_idx]
         poses     = seg['poses']
         direction = seg['direction']
         is_last   = (self.current_seg_idx == len(self.segments) - 1)
 
-        # ── Distancias al path ─────────────────────────────────────────────────
-        dists = [math.hypot(p.pose.position.x - self.current_x,
-                            p.pose.position.y - self.current_y) for p in poses]
+        dists       = [math.hypot(p.pose.position.x - self.current_x,
+                                   p.pose.position.y - self.current_y)
+                       for p in poses]
         closest_idx = int(np.argmin(dists))
         dist_to_end = dists[-1]
 
-        # ── Detección de llegada ───────────────────────────────────────────────
-        tol = self.GOAL_TOLERANCE if is_last else self.CUSP_TOLERANCE
-        if dist_to_end < tol:
-            self._publish_cmd(0.0, 0.0)
-            if is_last:
-                self.is_navigating = False
-                self.get_logger().info("¡Meta final alcanzada!")
+        # ── Activación del latch de Fase 3 ────────────────────────────────
+        if is_last and not self.p3_active and dist_to_end < P3_ENTRY_DIST:
+            self.p3_active = True
+            # Elegir estado inicial: si ya está en posición, ir directo a YAW
+            if dist_to_end <= P3_DRIFT_TOL_FACTOR * GOAL_TOLERANCE:
+                self.p3_state = P3_SETTLE_TO_YAW
+                self.p3_settle_count = P3_SETTLE_TICKS
             else:
-                self.get_logger().info(
-                    f"Cúspide alcanzada (seg {self.current_seg_idx}). Settlingando...")
-                self.current_seg_idx += 1
-                self.settling     = True
-                self.settle_start = self.get_clock().now().nanoseconds / 1e9
+                self.p3_state = P3_APPROACH
+            self.get_logger().info(
+                f"[P3] ACTIVADA (dist={dist_to_end:.2f}m) → {self.p3_state}")
+
+        # ── Delegar a Fase 3 si está activa ───────────────────────────────
+        if self.p3_active:
+            self._phase3(dist_to_end, direction, poses)
             return
 
-        # ── Lookahead: nunca pasa del extremo del segmento actual ──────────────
+        # ── Cúspide intermedia ────────────────────────────────────────────
+        if not is_last and dist_to_end < CUSP_TOLERANCE:
+            self._publish_cmd(0.0, 0.0)
+            self.get_logger().info(f"Cúspide (seg {self.current_seg_idx}). Settling…")
+            self.current_seg_idx += 1
+            self.settling     = True
+            self.settle_start = self.get_clock().now().nanoseconds / 1e9
+            return
+
+        # ── Lookahead ─────────────────────────────────────────────────────
         lookahead_idx = closest_idx
         for i in range(closest_idx, len(poses)):
             lookahead_idx = i
-            if dists[i] >= self.LOOKAHEAD_DIST:
+            if dists[i] >= LOOKAHEAD_DIST:
                 break
 
-        target = poses[lookahead_idx].pose.position
-
-        # ── Pure Pursuit en frame local del robot ─────────────────────────────
+        target  = poses[lookahead_idx].pose.position
         dx = target.x - self.current_x
         dy = target.y - self.current_y
         local_x =  dx * math.cos(self.current_yaw) + dy * math.sin(self.current_yaw)
         local_y = -dx * math.sin(self.current_yaw) + dy * math.cos(self.current_yaw)
-
-        # En marcha atrás el punto de mira está "detrás": invertimos y lateral
-        # para que la ley de dirección sea la misma.
         if direction < 0:
             local_y = -local_y
 
-        # Ángulo de volante: atan2(y_local, |x_local|) escalado
-        steer = self.K_ANGULAR * math.atan2(local_y, max(abs(local_x), 0.05))
-        steer = max(-self.MAX_STEER, min(self.MAX_STEER, steer))
+        steer_pp = K_ANGULAR * math.atan2(local_y, max(abs(local_x), 0.05))
 
-        # ── Velocidad adaptativa: frena al aproximarse al cusp ────────────────
-        # factor va de 0 (muy cerca) a 1 (lejos)
-        speed_factor = min(1.0, dist_to_end / self.APPROACH_SLOW_DIST)
-        # Curva cuadrática suave para no frenar demasiado bruscamente
-        speed_factor = speed_factor ** 1.5
-        speed = self.MIN_SPEED + (self.MAX_SPEED - self.MIN_SPEED) * speed_factor
+        # Fase 2: mezcla PP + yaw
+        if is_last and dist_to_end <= ALIGN_TRIGGER_DIST:
+            yaw_error = normalize_angle(self.goal_yaw - self.current_yaw)
+            steer_yaw = clamp(K_YAW_ALIGN * yaw_error * direction, -MAX_STEER, MAX_STEER)
+            alpha     = max(0.0, 1.0 - dist_to_end / ALIGN_TRIGGER_DIST) ** 0.5
+            steer     = (1.0 - alpha) * steer_pp + alpha * steer_yaw
+        else:
+            steer = steer_pp
 
+        steer        = clamp(steer, -MAX_STEER, MAX_STEER)
+        speed_factor = clamp(dist_to_end / APPROACH_SLOW_DIST, 0.0, 1.0) ** 1.5
+        speed        = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * speed_factor
         self._publish_cmd(direction * speed, steer)
 
-    # ── Helpers ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Fase 3 – máquina de estados
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _phase3(self, dist_to_end: float, direction: int, poses):
+        yaw_error  = normalize_angle(self.goal_yaw - self.current_yaw)
+        drift_tol  = P3_DRIFT_TOL_FACTOR * GOAL_TOLERANCE
+
+        # ── SETTLE (parada limpia) ─────────────────────────────────────────
+        if self.p3_state in (P3_SETTLE_TO_YAW, P3_SETTLE_TO_APPR):
+            self._publish_cmd(0.0, 0.0)
+            self.p3_settle_count -= 1
+            if self.p3_settle_count <= 0:
+                next_state = (P3_YAW_CORRECT if self.p3_state == P3_SETTLE_TO_YAW
+                              else P3_APPROACH)
+                self.p3_state = next_state
+                self.get_logger().info(f"[P3] → {next_state}")
+            return
+
+        # ── YAW_CORRECT ───────────────────────────────────────────────────
+        if self.p3_state == P3_YAW_CORRECT:
+            # Condición de fin: posición Y orientación ok
+            if abs(yaw_error) <= GOAL_YAW_TOL and dist_to_end <= GOAL_TOLERANCE:
+                self._publish_cmd(0.0, 0.0)
+                self.is_navigating = False
+                self.p3_state      = P3_DONE
+                self.get_logger().info(
+                    f"✓ Aparcamiento completado | "
+                    f"dist={dist_to_end:.3f}m | yaw_err={math.degrees(yaw_error):.1f}°")
+                return
+
+            # Se alejó demasiado: volver a acercarse
+            if dist_to_end > drift_tol:
+                self.p3_state        = P3_SETTLE_TO_APPR
+                self.p3_settle_count = P3_SETTLE_TICKS
+                self.get_logger().info(
+                    f"[P3] YAW → SETTLE_TO_APPROACH "
+                    f"(dist={dist_to_end:.2f} > {drift_tol:.2f})")
+                self._publish_cmd(0.0, 0.0)
+                return
+
+            # Corregir yaw in-situ
+            steer = clamp(K_YAW_ALIGN * yaw_error, -MAX_STEER, MAX_STEER)
+            self._publish_cmd(MICRO_SPEED, steer)
+            self.get_logger().debug(
+                f"[YAW] err={math.degrees(yaw_error):.1f}° "
+                f"steer={math.degrees(steer):.1f}° dist={dist_to_end:.2f}")
+            return
+
+        # ── APPROACH ──────────────────────────────────────────────────────
+        if self.p3_state == P3_APPROACH:
+            # Calcular dirección dinámica al goal
+            goal_pos = poses[-1].pose.position
+            dx = goal_pos.x - self.current_x
+            dy = goal_pos.y - self.current_y
+            local_x_goal = (dx * math.cos(self.current_yaw)
+                            + dy * math.sin(self.current_yaw))
+            appr_dir = 1 if local_x_goal >= 0.0 else -1
+
+            if dist_to_end <= GOAL_TOLERANCE:
+                self.p3_state        = P3_SETTLE_TO_YAW
+                self.p3_settle_count = P3_SETTLE_TICKS
+                self.get_logger().info(
+                    f"[P3] APPROACH → SETTLE_TO_YAW (dist={dist_to_end:.2f})")
+                self._publish_cmd(0.0, 0.0)
+                return
+
+            self._publish_cmd(appr_dir * MICRO_SPEED, 0.0)
+            self.get_logger().debug(
+                f"[APPR] dist={dist_to_end:.2f} dir={appr_dir}")
+            return
+
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _publish_cmd(self, v: float, steer: float):
         msg = Twist()
@@ -227,8 +328,6 @@ class ParkingController(Node):
         msg.angular.z = float(steer)
         self.cmd_pub.publish(msg)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
 
 def main():
     rclpy.init()
