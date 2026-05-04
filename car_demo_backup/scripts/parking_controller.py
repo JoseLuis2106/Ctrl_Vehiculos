@@ -4,6 +4,8 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Path, Odometry
+from sensor_msgs.msg import PointCloud2
+import sensor_msgs_py.point_cloud2 as pc2 
 import math
 import numpy as np
 
@@ -19,12 +21,14 @@ GOAL_YAW_TOL        = 0.03   # ~1.7°
 MAX_SPEED           = 0.70
 MIN_SPEED           = 0.15
 MICRO_SPEED         = 0.08
-K_ANGULAR           = 6.0
+K_ANGULAR           = 6.5
 K_YAW_ALIGN         = 7.5
 MAX_STEER           = 1.20
 APPROACH_SLOW_DIST  = 2.5
 ALIGN_TRIGGER_DIST  = 4.0
 SETTLING_TIME       = 0.80
+LASER2FRONT         = 2.79
+LASER2BACK          = 2.0
 
 # ── Fase final ───────────────────────────────────────────────────────────────
 PF_ENTRY_DIST       = 0.55   # [m]  distancia para activar el latch
@@ -61,9 +65,10 @@ class ParkingController(Node):
     def __init__(self):
         super().__init__('parking_controller')
 
-        self.cmd_pub  = self.create_publisher(Twist,     '/cmd_vel', 10)
-        self.path_sub = self.create_subscription(Path,     '/plan',  self.path_callback, 10)
+        self.cmd_pub  = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.path_sub = self.create_subscription(Path, '/plan',  self.path_callback, 10)
         self.odom_sub = self.create_subscription(Odometry, '/odom',  self.odom_callback, 10)
+        self.laser_sub = self.create_subscription(PointCloud2, '/prius/center_laser/scan', self.scan_callback, 10)
 
         self.current_x   = 0.0
         self.current_y   = 0.0
@@ -94,6 +99,23 @@ class ParkingController(Node):
         self.current_x   = msg.pose.pose.position.x
         self.current_y   = msg.pose.pose.position.y
         self.current_yaw = yaw_from_quat(msg.pose.pose.orientation)
+
+
+    def scan_callback(self, msg):
+        self.min_fwd = np.Inf
+        self.min_bwd = np.Inf
+        for p in pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True):
+            dist = math.sqrt(p[0]**2 + p[1]**2)
+            # Filtro de altura y distancia para limpiar ruido
+            if -0.1 < p[2] < 0.1 and 0.1 < dist < 12.0:
+                if p[0] > LASER2FRONT and abs(p[1]) < 1.1 and dist - LASER2FRONT < self.min_fwd:
+                    self.min_fwd = dist - LASER2FRONT
+                elif p[0] < -LASER2BACK and abs(p[1]) < 1.1 and dist - LASER2BACK < self.min_bwd:
+                    self.min_bwd = dist - LASER2BACK
+
+        # if self.min_fwd != np.Inf or self.min_bwd != np.Inf:
+        #     self.get_logger().info(f"min_fwd: {self.min_fwd:.2f}, min_bwd: {self.min_bwd:.2f}")
+
 
     def path_callback(self, msg):
         if len(msg.poses) < 2:
@@ -229,6 +251,12 @@ class ParkingController(Node):
         steer        = clamp(steer, -MAX_STEER, MAX_STEER)
         speed_factor = clamp(dist_to_end / APPROACH_SLOW_DIST, 0.0, 1.0) ** 1.5
         speed        = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * speed_factor
+
+        if direction > 0 and self.min_fwd < 0.07 or direction < 0 and self.min_bwd < 0.07:
+            self._publish_cmd(0.0, 0.0)
+            self.get_logger().info("Movimiento imposible. Choque inminente.")
+            return
+        
         self._publish_cmd(direction * speed, steer)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -259,8 +287,20 @@ class ParkingController(Node):
         local_x  = (dx_goal * math.cos(self.current_yaw)
                     + dy_goal * math.sin(self.current_yaw))
 
-        if abs(local_x) > PF_DIR_DEADBAND:
-            new_dir = 1 if local_x > 0.0 else -1
+        # if abs(local_x) > PF_DIR_DEADBAND:
+        #     new_dir = 1 if local_x > 0.0 else -1
+        #     if new_dir != self.pf_direction:
+        #         # Cambio de dirección detectado → parada breve
+        #         self.pf_direction  = new_dir
+        #         self.pf_flip_count = PF_FLIP_TICKS
+        #         self._publish_cmd(0.0, 0.0)
+        #         self.get_logger().info(
+        #             f"[PF] Cambio dir → {'FWD' if new_dir > 0 else 'REV'} "
+        #             f"(local_x={local_x:.3f})")
+        #         return
+
+        if self.min_fwd < 0.1 or self.min_bwd < 0.1:
+            new_dir = 1 if self.min_bwd < 0.1 else -1
             if new_dir != self.pf_direction:
                 # Cambio de dirección detectado → parada breve
                 self.pf_direction  = new_dir
@@ -268,11 +308,17 @@ class ParkingController(Node):
                 self._publish_cmd(0.0, 0.0)
                 self.get_logger().info(
                     f"[PF] Cambio dir → {'FWD' if new_dir > 0 else 'REV'} "
-                    f"(local_x={local_x:.3f})")
+                    f"(min_fwd={self.min_fwd:.3f})"
+                    f"(min_bwd={self.min_bwd:.3f})")
                 return
 
         # ── Corregir yaw ──────────────────────────────────────────────────
         steer = clamp(K_YAW_ALIGN * yaw_error, -MAX_STEER, MAX_STEER)
+        if self.pf_direction > 0 and self.min_fwd < 0.07 or self.pf_direction < 0 and self.min_bwd < 0.07:
+            self._publish_cmd(0.0, 0.0)
+            self.get_logger().info("Movimiento imposible. Choque inminente.")
+            return
+        
         self._publish_cmd(self.pf_direction * MICRO_SPEED, steer)
         self.get_logger().debug(
             f"[PF] dir={'F' if self.pf_direction > 0 else 'R'} "

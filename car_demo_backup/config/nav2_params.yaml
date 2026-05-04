@@ -16,7 +16,7 @@ planner_server:
       motion_model_for_search: "REEDS_SHEPP"
       reverse_penalty: 1.0
       change_penalty: 2.5
-      non_straight_penalty: 1.5
+      non_straight_penalty: 1.3
       cost_penalty: 1.65
       analytic_expansion_ratio: 5.0
 

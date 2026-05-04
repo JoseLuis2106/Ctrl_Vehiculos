@@ -23,8 +23,8 @@ class ParkingDetector(Node):
         qos_lidar = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=10)
         qos_viz = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, depth=10)
         
-        # self.subscription = self.create_subscription(LaserScan, '/prius/center_laser/scan', self.scan_callback, qos_lidar)
-        self.subscription = self.create_subscription(PointCloud2, '/prius/center_laser/scan', self.scan_callback, qos_lidar)
+        # self.laser_sub = self.create_subscription(LaserScan, '/prius/center_laser/scan', self.scan_callback, qos_lidar)
+        self.laser_sub = self.create_subscription(PointCloud2, '/prius/center_laser/scan', self.scan_callback, qos_lidar)
         self.marker_pub = self.create_publisher(Marker, '/parking_slot_marker', qos_viz)
         self.cluster_pub = self.create_publisher(MarkerArray, '/viz_clusters', qos_viz)
         self.goal_pub = self.create_publisher(PoseStamped, '/parking_goal', qos_viz)        
@@ -39,7 +39,7 @@ class ParkingDetector(Node):
 
         self.min_slot_width = 5.5
         self.max_slot_width = 9.0 
-        self.offsetx = 1.4 
+        self.offsetx = 1.3 
         self.offsety = 1.3
 
         self.replan_timer = None
