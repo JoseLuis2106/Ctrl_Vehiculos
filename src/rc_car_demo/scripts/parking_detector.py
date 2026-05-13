@@ -37,10 +37,10 @@ class ParkingDetector(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        self.min_slot_width = 1.5                                 # Necesitara cambios
-        self.max_slot_width = 5.0                                 # Necesitara cambios
-        self.offsetx = 0.4                                        # Necesitara cambios
-        self.offsety = 0.3                                        # Necesitara cambios
+        self.min_slot_width = 0.6                                 # Necesitara cambios
+        self.max_slot_width = 3.0                                 # Necesitara cambios
+        self.offsetx = 0.15                                       # Necesitara cambios
+        self.offsety = 0.15                                       # Necesitara cambios
 
         self.replan_timer = None
         self.parking_finished = False
@@ -197,7 +197,7 @@ class ParkingDetector(Node):
         depth_diff = np.abs(dist_to_sensor[1:] - dist_to_sensor[:-1])
         spatial_diff = np.linalg.norm(points[1:] - points[:-1], axis=1)
         
-        indices = np.where((spatial_diff > 0.3) | (depth_diff > 0.4))[0] + 1                                      # Necesitara cambios
+        indices = np.where((spatial_diff > 0.6) | (depth_diff > 0.3))[0] + 1                                      # Necesitara cambios
         clusters = np.split(points, indices)
         clusters = [c for c in clusters if len(c) > 5]
         

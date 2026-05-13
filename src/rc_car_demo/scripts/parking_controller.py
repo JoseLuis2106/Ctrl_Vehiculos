@@ -27,8 +27,8 @@ MAX_STEER           = 1.20                              # Necesitara cambios
 APPROACH_SLOW_DIST  = 0.8                               # Necesitara cambios
 ALIGN_TRIGGER_DIST  = 1.0                               # Necesitara cambios
 SETTLING_TIME       = 0.80
-LASER2FRONT         = 0.6                               # Necesitara cambios
-LASER2BACK          = 0.3                               # Necesitara cambios
+LASER2FRONT         = 0.13                              # Necesitara cambios
+LASER2BACK          = 0.18                              # Necesitara cambios
 
 # ── Fase final ───────────────────────────────────────────────────────────────
 PF_ENTRY_DIST       = 0.25   # [m]  distancia para activar el latch                                       # Necesitara cambios
@@ -314,7 +314,7 @@ class ParkingController(Node):
 
         # ── Corregir yaw ──────────────────────────────────────────────────
         steer = clamp(K_YAW_ALIGN * yaw_error, -MAX_STEER, MAX_STEER)
-        if self.pf_direction > 0 and self.min_fwd < 0.07 or self.pf_direction < 0 and self.min_bwd < 0.07:                              # Necesitara cambios
+        if self.pf_direction > 0 and self.min_fwd < 0.05 or self.pf_direction < 0 and self.min_bwd < 0.05:                              # Necesitara cambios
             self._publish_cmd(0.0, 0.0)
             self.get_logger().info("Movimiento imposible. Choque inminente.")
             return

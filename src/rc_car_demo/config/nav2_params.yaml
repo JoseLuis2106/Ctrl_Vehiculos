@@ -10,7 +10,7 @@ planner_server:
       max_on_approach_iterations: 10000
       downsample_costmap: false
       allow_unknown: true
-      minimum_turning_radius: 1.0                 # Necesitara cambios
+      minimum_turning_radius: 0.6                 # Necesitara cambios
       lookup_table_size: 20.0
       cache_obstacle_heuristic: false
       motion_model_for_search: "REEDS_SHEPP"
@@ -34,8 +34,8 @@ global_costmap:
       height: 20 
       resolution: 0.1
       
-      robot_radius: 1.0                         # Necesitara cambios
-      footprint: "[ [0.5, 0.1], [0.5, -0.1], [-0.2, -0.1], [-0.2, 0.1] ]"           # Necesitara cambios
+      robot_radius: 0.4                         # Necesitara cambios
+      footprint: "[ [0.26, 0.12], [0.26, -0.12], [-0.04, -0.12], [-0.04, 0.12] ]"           # Necesitara cambios
       
       plugins: ["obstacle_layer", "inflation_layer"]
       
@@ -71,7 +71,7 @@ local_costmap:
       width: 20
       height: 20
       resolution: 0.1
-      footprint: "[ [0.5, 0.1], [0.5, -0.1], [-0.2, -0.1], [-0.2, 0.1] ]"           # Necesitara cambios
+      footprint: "[ [0.26, 0.12], [0.26, -0.12], [-0.04, -0.12], [-0.04, 0.12] ]"           # Necesitara cambios
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
