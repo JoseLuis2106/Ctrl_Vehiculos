@@ -4,7 +4,7 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    pkg_share = get_package_share_directory('car_demo')
+    pkg_share = get_package_share_directory('rc_car_demo')
     nav2_params = os.path.join(pkg_share, 'config', 'nav2_params.yaml')
 
     return LaunchDescription([
