@@ -1,0 +1,218 @@
+<sdf version='1.7'>
+  <world name='default'>
+    <light name='sun' type='directional'>
+      <cast_shadows>1</cast_shadows>
+      <pose>0 0 10 0 -0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Cámara inicial: vista cenital centrada sobre el aparcamiento -->
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <pose>0 -3 30 0 1.5708 0</pose>
+        <view_controller>orbit</view_controller>
+      </camera>
+    </gui>
+
+    <model name='ground_plane'>
+      <static>1</static>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+        </collision>
+        <visual name='visual'>
+          <cast_shadows>0</cast_shadows>
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material>
+            <script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name='model_prius_0'>
+      <pose>-0.23593 -3.04914 0 0 -0 0</pose>
+      <static>1</static>
+
+      <!-- ═══ Pared trasera de toda la zona ═══════════════════════════════ -->
+      <link name='Wall_17'>
+        <pose>0 -1.93339 0 0 -0 0</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>22.25 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>22.25 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      
+      <!-- ═══ Division carril contrario ═══════════════════════════════════ -->
+      <link name='Wall_18'>
+        <pose>0 5.5 0 0 -0 0</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>22.25 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>22.25 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+
+      <!-- ═══ Coche Izquierda ══════════════════════════════════════════════ -->
+      <link name='Wall_19'>
+        <pose>-8.81898 -0.80112 0 0 -0 0</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4.25 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4.25 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_20'>
+        <pose>-6.76898 0.12388 0 0 -0 1.5708</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_21'>
+        <pose>-8.81898 1.04888 0 0 -0 3.14159</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4.25 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4.25 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_22'>
+        <pose>-10.86897 0.12388 0 0 0 -1.5708</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+
+      <!-- ═══ Coche Centro ════════════════════════════════════════════════ -->
+      <link name='Wall_24'>
+        <pose>-3.21445 -0.80112 0 0 -0 0</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>5 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>5 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_25'>
+        <pose>-0.78945 0.12388 0 0 -0 1.5708</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_26'>
+        <pose>-3.21445 1.04888 0 0 -0 3.14159</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>5 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>5 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_27'>
+        <pose>-5.63945 0.12388 0 0 0 -1.5708</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>2 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+
+      <!-- ═══ Coche Derecha ════════════════════════════════════════════════
+           Desplazado −0.1 m en X respecto a la versión anterior para que
+           el hueco entre Wall_25 (Coche Centro) y Wall_32 sea exactamente
+           6.0 m de luz interior.
+           Verificación:
+             cara derecha Wall_25  = (−0.23593 − 0.78945) + 0.075 = −0.95038 m
+             cara izquierda Wall_32 = (−0.23593 + 5.36055) − 0.075 =  5.04962 m
+             hueco = 5.04962 − (−0.95038) = 6.000 m  ✓             -->
+      <link name='Wall_32'>
+        <pose>5.36055 0.12388 0 0 -0 1.5708</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>1.75 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>1.75 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_33'>
+        <pose>7.28555 1.04888 0 0 -0 0</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_34'>
+        <pose>9.21055 0.12388 0 0 -0 -1.5708</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>1.75 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>1.75 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+      <link name='Wall_35'>
+        <pose>7.28555 -0.80112 0 0 -0 3.14159</pose>
+        <collision name='collision'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4 0.15 2.5</size></box></geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 1.25 0 -0 0</pose>
+          <geometry><box><size>4 0.15 2.5</size></box></geometry>
+        </visual>
+      </link>
+
+    </model>
+  </world>
+</sdf>

@@ -23,8 +23,8 @@ class ParkingDetector(Node):
         qos_lidar = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=10)
         qos_viz = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, depth=10)
         
-        # self.laser_sub = self.create_subscription(LaserScan, '/prius/center_laser/scan', self.scan_callback, qos_lidar)
-        self.laser_sub = self.create_subscription(PointCloud2, '/prius/center_laser/scan', self.scan_callback, qos_lidar)
+        # self.laser_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, qos_lidar)
+        self.laser_sub = self.create_subscription(PointCloud2, '/scan', self.scan_callback, qos_lidar)
         self.marker_pub = self.create_publisher(Marker, '/parking_slot_marker', qos_viz)
         self.cluster_pub = self.create_publisher(MarkerArray, '/viz_clusters', qos_viz)
         self.goal_pub = self.create_publisher(PoseStamped, '/parking_goal', qos_viz)        
@@ -213,7 +213,8 @@ class ParkingDetector(Node):
             y_mid = np.mean(np.abs(c_mid[:, 1]))
             y_right = np.mean(np.abs(c_right[:, 1]))
 
-            if y_mid > (y_left + 1.5) and y_mid > (y_right + 1.5):
+            self.get_logger().info(f"y_mid:{y_mid}\ny_left+0.15:{y_left + 0.15}\ny_right+0.15:{y_right + 0.15}")
+            if y_mid > (y_left + 0.15) and y_mid > (y_right + 0.15):
                 d_left = np.linalg.norm(c_left, axis=1)
                 d_mid = np.linalg.norm(c_mid, axis=1)
                 d_right = np.linalg.norm(c_right, axis=1)
@@ -224,9 +225,10 @@ class ParkingDetector(Node):
                 
                 width = np.linalg.norm(p2 - p1)
 
+                self.get_logger().info(f"width:{width}\nmin_slot_width:{self.min_slot_width}\nmax_slot_width:{self.max_slot_width}")
                 if self.min_slot_width < width < self.max_slot_width and self.state != "STOPPED":
                     center = (p1 + p2 + p3 + p4) / 4.0
-                    self.publish_parking_visual(p1, p2, p3, p4, width)
+                    self.publish_parking_visual(p1, p2, p3, p4)
 
                     y_wall = np.mean(c_mid[:, 1])                    
                     y_goal = center[1]
@@ -239,7 +241,8 @@ class ParkingDetector(Node):
                     y_adjustment = max(0, self.offsety - d_goal_wall)
                     center[1] += direction_y * y_adjustment
 
-                    if center[0] < 0.0: 
+                    self.get_logger().info(f"center[0]: {center[0]}")
+                    if center[0] < 0.1: 
                         self.get_logger().info(f"HUECO DETECTADO! Ancho: {width:.2f}m")
                         self.stop_car()
                         pts = [p1, p2, p3, p4]
@@ -274,7 +277,7 @@ class ParkingDetector(Node):
         self.cluster_pub.publish(marker_array)
 
 
-    def publish_parking_visual(self, p1, p2, p3, p4, width):
+    def publish_parking_visual(self, p1, p2, p3, p4f):
         marker = Marker()
         marker.header.frame_id = "center_laser_link"
         marker.header.stamp = self.get_clock().now().to_msg()
